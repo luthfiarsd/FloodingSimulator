@@ -24,7 +24,7 @@ body {
   padding: 15px 20px;
   border-radius: 8px;
   font-size: 14px;
-  max-width: 300px;
+  max-width: 320px;
   z-index: 100;
 }
 
@@ -37,6 +37,58 @@ body {
 #info-panel p {
   margin: 5px 0;
   line-height: 1.4;
+}
+
+.sdg-dropdown {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 10px;
+  border-radius: 5px;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+
+.sdg-dropdown summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sdg-dropdown summary::-webkit-details-marker {
+  display: none;
+}
+
+.sdg-dropdown summary::before {
+  content: "▶ ";
+  display: inline-block;
+  transition: transform 0.3s;
+}
+
+.sdg-dropdown[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.sdg-dropdown p {
+  margin-top: 8px;
+}
+
+.sdg-cities {
+  border-left: 3px solid #ffd93d;
+}
+
+.sdg-cities summary strong {
+  color: #ffd93d;
+}
+
+.sdg-climate {
+  border-left: 3px solid #51cf66;
+}
+
+.sdg-climate summary strong {
+  color: #51cf66;
+}
+
+.sim-data {
+  margin-top: 10px;
 }
 
 .warning {

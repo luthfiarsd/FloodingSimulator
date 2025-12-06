@@ -2,8 +2,14 @@
 // SCENE SETUP
 // =====================================================
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb);
-scene.fog = new THREE.Fog(0x87ceeb, 50, 200);
+
+// Realistic sky gradient background
+const skyColor = 0x87ceeb; // Light blue
+const horizonColor = 0xe0f2ff; // Lighter blue near horizon
+scene.background = new THREE.Color(skyColor);
+
+// Enhanced fog for atmospheric depth
+scene.fog = new THREE.FogExp2(0xd4e8f5, 0.008);
 
 // Camera
 const camera = new THREE.PerspectiveCamera(
@@ -46,6 +52,95 @@ directionalLight.shadow.camera.bottom = -50;
 directionalLight.shadow.mapSize.width = 2048;
 directionalLight.shadow.mapSize.height = 2048;
 scene.add(directionalLight);
+
+// =====================================================
+// SKY & ATMOSPHERIC EFFECTS
+// =====================================================
+
+// Create realistic sky dome with gradient
+const skyGeometry = new THREE.SphereGeometry(450, 32, 32);
+const skyMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    topColor: { value: new THREE.Color(0x0077be) },
+    bottomColor: { value: new THREE.Color(0xe0f2ff) },
+    offset: { value: 33 },
+    exponent: { value: 0.6 },
+  },
+  vertexShader: `
+    varying vec3 vWorldPosition;
+    void main() {
+      vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+      vWorldPosition = worldPosition.xyz;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 topColor;
+    uniform vec3 bottomColor;
+    uniform float offset;
+    uniform float exponent;
+    varying vec3 vWorldPosition;
+    void main() {
+      float h = normalize(vWorldPosition + offset).y;
+      gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
+    }
+  `,
+  side: THREE.BackSide,
+});
+const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+scene.add(sky);
+
+// Cloud system - multiple cloud layers for realism
+const clouds = [];
+const cloudGroup = new THREE.Group();
+
+function createCloud(x, y, z, scale) {
+  const cloudGeometry = new THREE.SphereGeometry(1, 8, 8);
+  const cloudMaterial = new THREE.MeshLambertMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.7,
+  });
+
+  const cloud = new THREE.Group();
+
+  // Create fluffy cloud shape with multiple spheres
+  for (let i = 0; i < 5; i++) {
+    const puff = new THREE.Mesh(cloudGeometry, cloudMaterial);
+    puff.position.x = Math.random() * 2 - 1;
+    puff.position.y = Math.random() * 0.5;
+    puff.position.z = Math.random() * 2 - 1;
+    puff.scale.set(
+      0.5 + Math.random() * 0.8,
+      0.4 + Math.random() * 0.5,
+      0.5 + Math.random() * 0.8
+    );
+    cloud.add(puff);
+  }
+
+  cloud.position.set(x, y, z);
+  cloud.scale.set(scale, scale, scale);
+
+  // Store speed and direction for animation
+  cloud.userData.speed = 0.01 + Math.random() * 0.02;
+  cloud.userData.startX = x;
+
+  return cloud;
+}
+
+// Generate clouds at various heights and positions
+for (let i = 0; i < 5; i++) {
+  const x = (Math.random() - 0.5) * 200;
+  const y = 20 + Math.random() * 30;
+  const z = (Math.random() - 0.5) * 200;
+  const scale = 3 + Math.random() * 4;
+
+  const cloud = createCloud(x, y, z, scale);
+  clouds.push(cloud);
+  cloudGroup.add(cloud);
+}
+
+scene.add(cloudGroup);
 
 // =====================================================
 // TERRAIN GENERATION (High Detail Procedural Beach & Land)
@@ -529,84 +624,144 @@ const waterSideMaterial = new THREE.MeshPhongMaterial({
 // Create water side walls that will be updated dynamically
 const waterWalls = [];
 
-function createWaterSide(width, x, z, rotateY = 0) {
-  const WATER_WALL_HEIGHT = 35; // Tall enough to handle water rise up to 2200
-  const geometry = new THREE.PlaneGeometry(width, WATER_WALL_HEIGHT);
+// Create dynamic water side wall that follows wave shape
+function createDynamicWaterSide(segments, isHorizontal, xPos, zPos, width) {
+  const geometry = new THREE.BufferGeometry();
+  const positions = [];
+  const indices = [];
+
+  // Create vertices
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+
+    if (isHorizontal) {
+      // Front or back wall (along x-axis)
+      const x = -width / 2 + t * width;
+      const z = zPos;
+
+      // Top vertex (will be updated based on wave)
+      positions.push(x, 0, z);
+      // Bottom vertex (at ocean floor)
+      positions.push(x, -2, z);
+    } else {
+      // Left or right wall (along z-axis)
+      const x = xPos;
+      const z = -width / 2 + t * width;
+
+      // Top vertex (will be updated based on wave)
+      positions.push(x, 0, z);
+      // Bottom vertex (at ocean floor)
+      positions.push(x, -2, z);
+    }
+  }
+
+  // Create triangles
+  for (let i = 0; i < segments; i++) {
+    const topLeft = i * 2;
+    const bottomLeft = i * 2 + 1;
+    const topRight = (i + 1) * 2;
+    const bottomRight = (i + 1) * 2 + 1;
+
+    indices.push(topLeft, bottomLeft, topRight);
+    indices.push(topRight, bottomLeft, bottomRight);
+  }
+
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(positions, 3)
+  );
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+
   const mesh = new THREE.Mesh(geometry, waterSideMaterial);
-  mesh.position.set(x, 0, z); // Will be updated dynamically
-  if (rotateY) mesh.rotation.y = rotateY;
   return mesh;
 }
 
 // Front water wall (beach facing) - positioned slightly inside to avoid z-fighting
-const waterFrontWall = createWaterSide(100, 0, -49.9);
-waterWalls.push(waterFrontWall);
+const waterFrontWall = createDynamicWaterSide(100, true, 0, -49.9, 100);
+waterWalls.push({ mesh: waterFrontWall, type: "front" });
 scene.add(waterFrontWall);
 
 // Back water wall - positioned slightly inside to avoid z-fighting
-const waterBackWall = createWaterSide(100, 0, 49.9);
-waterWalls.push(waterBackWall);
+const waterBackWall = createDynamicWaterSide(100, true, 0, 49.9, 100);
+waterWalls.push({ mesh: waterBackWall, type: "back" });
 scene.add(waterBackWall);
 
 // Left water wall - positioned slightly inside to avoid z-fighting
-const waterLeftWall = createWaterSide(100, -49.9, 0, Math.PI / 2);
-waterWalls.push(waterLeftWall);
+const waterLeftWall = createDynamicWaterSide(100, false, -49.9, 0, 100);
+waterWalls.push({ mesh: waterLeftWall, type: "left" });
 scene.add(waterLeftWall);
 
 // Right water wall - positioned slightly inside to avoid z-fighting
-const waterRightWall = createWaterSide(100, 49.9, 0, Math.PI / 2);
-waterWalls.push(waterRightWall);
+const waterRightWall = createDynamicWaterSide(100, false, 49.9, 0, 100);
+waterWalls.push({ mesh: waterRightWall, type: "right" });
 scene.add(waterRightWall);
 
-// Function to update water wall positions based on current water level
+// Function to update water wall positions based on current water level and wave shape
 function updateWaterWalls() {
-  const waterY = water.position.y;
-  const WALL_HEIGHT = 35;
   const BARRIER_Z = 10; // Position of flood barrier
 
-  waterWalls.forEach((wall) => {
-    // If barrier is active, hide walls behind the barrier (back wall and portions of side walls)
+  waterWalls.forEach((wallObj) => {
+    const wall = wallObj.mesh;
+    const wallType = wallObj.type;
+
+    // If barrier is active, hide walls behind the barrier (back wall)
     if (simulationParams.floodBarrier) {
-      // Back wall is at z = 49.9, completely behind barrier
-      if (wall === waterBackWall) {
+      if (wallType === "back") {
         wall.visible = false;
         return;
       }
-
-      // Side walls (left and right) need to be shortened to stop at barrier
-      if (wall === waterLeftWall || wall === waterRightWall) {
-        // Shorten the wall to only extend from front (-50) to barrier (10)
-        // Original width is 100, new width should be 60 (from -50 to 10)
-        const newWidth = 60;
-        wall.geometry.dispose();
-        wall.geometry = new THREE.PlaneGeometry(newWidth, WALL_HEIGHT);
-        // Reposition to center between -50 and 10: (-50 + 10) / 2 = -20
-        wall.position.z = -20;
-        wall.visible = true;
-      } else {
-        wall.visible = true;
-      }
-    } else {
-      // Barrier not active, show all walls normally
       wall.visible = true;
-
-      // Restore side walls to full length if they were shortened
-      if (wall === waterLeftWall || wall === waterRightWall) {
-        if (wall.geometry.parameters.width !== 100) {
-          wall.geometry.dispose();
-          wall.geometry = new THREE.PlaneGeometry(100, WALL_HEIGHT);
-          wall.position.z = 0;
-        }
-      }
+    } else {
+      wall.visible = true;
     }
 
-    // Position wall so bottom is at ocean floor (-2) and top follows water level
-    const wallBottomY = -2;
-    const currentWallHeight = Math.max(1, waterY - wallBottomY + 0.2); // +1 for slight extension above water
-    const actualHeight = Math.min(WALL_HEIGHT, currentWallHeight);
+    // Update wall vertices to follow wave shape
+    const positions = wall.geometry.attributes.position.array;
 
-    wall.position.y = wallBottomY + actualHeight / 2;
-    wall.scale.y = actualHeight / WALL_HEIGHT;
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i];
+      const z = positions[i + 2];
+      const isTopVertex = i % 6 === 0; // Every first vertex in pair is top vertex
+
+      if (!isTopVertex) continue; // Skip bottom vertices
+
+      // Get wave height at this position by sampling from water geometry
+      let waveHeight = 0;
+
+      // Find corresponding vertex in water geometry
+      const waterPositions = waterGeometry.attributes.position.array;
+      let closestDistance = Infinity;
+      let closestHeight = 0;
+
+      for (let j = 0; j < waterPositions.length; j += 3) {
+        const wx = waterPositions[j];
+        const wz = waterPositions[j + 2];
+
+        // Check if water vertex is close to wall vertex
+        const distance = Math.sqrt((wx - x) * (wx - x) + (wz - z) * (wz - z));
+
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestHeight = waterPositions[j + 1];
+        }
+      }
+
+      // Set top vertex to wave height plus water level
+      waveHeight = closestHeight + water.position.y;
+
+      // If barrier is active and wall is behind barrier, clamp height
+      if (simulationParams.floodBarrier) {
+        if ((wallType === "left" || wallType === "right") && z > BARRIER_Z) {
+          waveHeight = -2; // Push below ground
+        }
+      }
+
+      positions[i + 1] = waveHeight;
+    }
+
+    wall.geometry.attributes.position.needsUpdate = true;
+    wall.geometry.computeVertexNormals();
   });
 }
 
@@ -767,9 +922,8 @@ const TSUNAMI_DURATION = 8; // seconds - longer for more dramatic effect
 const TSUNAMI_HEIGHT = 15; // maximum tsunami wave height
 const TSUNAMI_WIDTH = 25; // width of the wave crest
 
-// Tsunami side walls (solid geometry)
-let tsunamiLeftWall = null;
-let tsunamiRightWall = null;
+// Tsunami side walls (solid geometry) - these walls follow wave shape during tsunami
+let tsunamiSideWalls = [];
 
 function createTsunamiSideWalls() {
   // Material for tsunami side walls - solid blue water color
@@ -780,21 +934,19 @@ function createTsunamiSideWalls() {
     side: THREE.DoubleSide,
   });
 
-  // Left wall (x = -50)
-  const leftWallGeometry = new THREE.PlaneGeometry(100, 30);
-  tsunamiLeftWall = new THREE.Mesh(leftWallGeometry, tsunamiWallMaterial);
-  tsunamiLeftWall.rotation.y = Math.PI / 2;
-  tsunamiLeftWall.position.set(-50, 0, 0);
-  tsunamiLeftWall.visible = false;
-  scene.add(tsunamiLeftWall);
+  // Left wall (x = -50) - dynamic geometry
+  const leftWall = createDynamicWaterSide(100, false, -49.9, 0, 100);
+  leftWall.material = tsunamiWallMaterial;
+  leftWall.visible = false;
+  tsunamiSideWalls.push({ mesh: leftWall, type: "left" });
+  scene.add(leftWall);
 
-  // Right wall (x = 50)
-  const rightWallGeometry = new THREE.PlaneGeometry(100, 30);
-  tsunamiRightWall = new THREE.Mesh(rightWallGeometry, tsunamiWallMaterial);
-  tsunamiRightWall.rotation.y = Math.PI / 2;
-  tsunamiRightWall.position.set(50, 0, 0);
-  tsunamiRightWall.visible = false;
-  scene.add(tsunamiRightWall);
+  // Right wall (x = 50) - dynamic geometry
+  const rightWall = createDynamicWaterSide(100, false, 49.9, 0, 100);
+  rightWall.material = tsunamiWallMaterial;
+  rightWall.visible = false;
+  tsunamiSideWalls.push({ mesh: rightWall, type: "right" });
+  scene.add(rightWall);
 }
 
 // Create the walls on load
@@ -806,8 +958,9 @@ function startTsunami() {
   tsunamiTime = 0;
 
   // Show tsunami side walls
-  if (tsunamiLeftWall) tsunamiLeftWall.visible = true;
-  if (tsunamiRightWall) tsunamiRightWall.visible = true;
+  tsunamiSideWalls.forEach((wallObj) => {
+    wallObj.mesh.visible = true;
+  });
 }
 
 function updateTsunami(deltaTime) {
@@ -819,8 +972,9 @@ function updateTsunami(deltaTime) {
   if (progress >= 1) {
     tsunamiActive = false;
     // Hide tsunami side walls after tsunami ends
-    if (tsunamiLeftWall) tsunamiLeftWall.visible = false;
-    if (tsunamiRightWall) tsunamiRightWall.visible = false;
+    tsunamiSideWalls.forEach((wallObj) => {
+      wallObj.mesh.visible = false;
+    });
     return;
   }
 
@@ -898,19 +1052,48 @@ function updateTsunami(deltaTime) {
     water.position.y = currentWaterLevel;
   }
 
-  // Update tsunami side walls position to match wave
-  if (tsunamiLeftWall && tsunamiRightWall) {
-    const wallHeight = waveAmplitude + 5;
-    const wallY = currentWaterLevel + wallHeight / 2;
+  // Update tsunami side walls to follow wave shape
+  tsunamiSideWalls.forEach((wallObj) => {
+    const wall = wallObj.mesh;
+    const positions = wall.geometry.attributes.position.array;
 
-    tsunamiLeftWall.position.y = wallY;
-    tsunamiLeftWall.position.z = wavePosition;
-    tsunamiLeftWall.scale.y = wallHeight / 30;
+    for (let i = 0; i < positions.length; i += 3) {
+      const z = positions[i + 2];
+      const isTopVertex = i % 6 === 0; // Every first vertex in pair is top vertex
 
-    tsunamiRightWall.position.y = wallY;
-    tsunamiRightWall.position.z = wavePosition;
-    tsunamiRightWall.scale.y = wallHeight / 30;
-  }
+      if (!isTopVertex) continue; // Skip bottom vertices
+
+      // Get wave height at this z position
+      let waveHeight = 0;
+
+      // Sample wave height from water geometry at this z position
+      const waterPositions = waterGeometry.attributes.position.array;
+      let closestDistance = Infinity;
+      let closestHeight = 0;
+
+      for (let j = 0; j < waterPositions.length; j += 3) {
+        const wz = waterPositions[j + 2];
+        const distance = Math.abs(wz - z);
+
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestHeight = waterPositions[j + 1];
+        }
+      }
+
+      waveHeight = closestHeight + water.position.y;
+
+      // If barrier is active and this part is behind barrier, push down
+      if (simulationParams.floodBarrier && z > 10) {
+        waveHeight = -2;
+      }
+
+      positions[i + 1] = waveHeight;
+    }
+
+    wall.geometry.attributes.position.needsUpdate = true;
+    wall.geometry.computeVertexNormals();
+  });
 
   updateFloodStatus();
 }
@@ -985,6 +1168,18 @@ function animate() {
 
   // Update tsunami
   updateTsunami(deltaTime);
+
+  // Animate clouds - slow drift across sky
+  clouds.forEach((cloud) => {
+    cloud.position.x += cloud.userData.speed;
+    // Loop clouds back when they move too far
+    if (cloud.position.x > 150) {
+      cloud.position.x = -150;
+    }
+    // Gentle bobbing motion
+    cloud.position.y +=
+      Math.sin(Date.now() * 0.0001 + cloud.position.x) * 0.001;
+  });
 
   // Update controls
   controls.update();
