@@ -562,8 +562,44 @@ scene.add(waterRightWall);
 function updateWaterWalls() {
   const waterY = water.position.y;
   const WALL_HEIGHT = 35;
+  const BARRIER_Z = 10; // Position of flood barrier
 
   waterWalls.forEach((wall) => {
+    // If barrier is active, hide walls behind the barrier (back wall and portions of side walls)
+    if (simulationParams.floodBarrier) {
+      // Back wall is at z = 49.9, completely behind barrier
+      if (wall === waterBackWall) {
+        wall.visible = false;
+        return;
+      }
+
+      // Side walls (left and right) need to be shortened to stop at barrier
+      if (wall === waterLeftWall || wall === waterRightWall) {
+        // Shorten the wall to only extend from front (-50) to barrier (10)
+        // Original width is 100, new width should be 60 (from -50 to 10)
+        const newWidth = 60;
+        wall.geometry.dispose();
+        wall.geometry = new THREE.PlaneGeometry(newWidth, WALL_HEIGHT);
+        // Reposition to center between -50 and 10: (-50 + 10) / 2 = -20
+        wall.position.z = -20;
+        wall.visible = true;
+      } else {
+        wall.visible = true;
+      }
+    } else {
+      // Barrier not active, show all walls normally
+      wall.visible = true;
+
+      // Restore side walls to full length if they were shortened
+      if (wall === waterLeftWall || wall === waterRightWall) {
+        if (wall.geometry.parameters.width !== 100) {
+          wall.geometry.dispose();
+          wall.geometry = new THREE.PlaneGeometry(100, WALL_HEIGHT);
+          wall.position.z = 0;
+        }
+      }
+    }
+
     // Position wall so bottom is at ocean floor (-2) and top follows water level
     const wallBottomY = -2;
     const currentWallHeight = Math.max(1, waterY - wallBottomY + 0.2); // +1 for slight extension above water
@@ -815,9 +851,9 @@ function updateTsunami(deltaTime) {
   for (let i = 0; i < waterVertices.length; i += 3) {
     const z = originalWaterPositions[i + 2];
 
-    // If barrier is active and this vertex is beyond the barrier, keep water low
+    // If barrier is active and this vertex is beyond the barrier, push water far below ground
     if (simulationParams.floodBarrier && z > barrierZ) {
-      waterVertices[i + 1] = originalWaterPositions[i + 1];
+      waterVertices[i + 1] = -water.position.y;
       continue;
     }
 
@@ -896,9 +932,10 @@ function animateWaves(deltaTime) {
     const x = originalWaterPositions[i];
     const z = originalWaterPositions[i + 2];
 
-    // If barrier is active and this vertex is beyond the barrier, minimize waves
+    // If barrier is active and this vertex is beyond the barrier, push water down below ground
     if (simulationParams.floodBarrier && z > 10) {
-      waterVertices[i + 1] = originalWaterPositions[i + 1] * 0.1; // Very small waves
+      // Push water far below current water level to ensure it stays hidden
+      waterVertices[i + 1] = -water.position.y; // Always below ground
       continue;
     }
 
