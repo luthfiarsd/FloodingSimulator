@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rising Sea Level & Tsunami Simulator</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="canvas-container"></div>
+
+    <div id="info-panel">
+      <h2>🌊 Sea Level Simulator</h2>
+      <p>Year: <span id="year-display">2025</span></p>
+      <p>Water Level: <span id="water-level">0.0m</span></p>
+      <p>Status: <span id="flood-status" class="safe">Safe</span></p>
+      <p style="font-size: 11px; margin-top: 10px; opacity: 0.8">
+        Use mouse to rotate view. Adjust controls in the panel on the right.
+      </p>
+    </div>
+
+    <!-- Three.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <!-- OBJ Loader -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+
+    <!-- dat.GUI for controls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.7/dat.gui.min.js"></script>
+
+    <script src="floodingsimulator.js"></script>
+  </body>
+</html>
